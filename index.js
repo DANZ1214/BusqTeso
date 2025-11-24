@@ -279,6 +279,4 @@ app.post('/api/verificar-respuesta', async (req, res) => {
   }
 });
 
-app.listen(3001, () => {
-  console.log("API escuchando en localhost:3001");
-});
+export default app;
