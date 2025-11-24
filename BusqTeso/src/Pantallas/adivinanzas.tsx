@@ -35,11 +35,12 @@ const Adivinanzas = () => {
       return;
     }
     cargarAdivinanza();
+    // eslint-disable-next-line
   }, [grupoId]);
 
   const cargarAdivinanza = async () => {
     try {
-      const res = await fetch(`http://localhost:3001/api/adivinanza/${grupoId}`);
+      const res = await fetch(`/api/adivinanza/${grupoId}`);
       const data: AdivinanzaData = await res.json();
       if (data.eliminado) {
         setError('Tu grupo ha sido eliminado por agotar los intentos.');
@@ -60,7 +61,7 @@ const Adivinanzas = () => {
     setError(null);
 
     try {
-      const res = await fetch('http://localhost:3001/api/verificar-respuesta', {
+      const res = await fetch('/api/verificar-respuesta', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

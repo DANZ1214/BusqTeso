@@ -21,13 +21,13 @@ const Registro = () => {
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [grupoActivo, setGrupoActivo] = useState<number | null>(null);
-  
+
   const navigate = useNavigate();
 
   // Consulta grupo abierto cada vez que mensaje cambia
   const fetchGrupoActivo = async () => {
     try {
-      const res = await fetch("http://localhost:3001/api/grupo-abierto");
+      const res = await fetch("/api/grupo-abierto");
       const data = await res.json();
       if (data.grupoId) {
         setGrupoActivo(data.grupoId);
@@ -50,7 +50,7 @@ const Registro = () => {
     setError(null);
 
     try {
-      const response = await fetch("http://localhost:3001/api/registro", {
+      const response = await fetch("/api/registro", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nombre, identificacion }),
@@ -84,7 +84,7 @@ const Registro = () => {
     setError(null);
 
     try {
-      const response = await fetch("http://localhost:3001/api/verificar-id", {
+      const response = await fetch("/api/verificar-id", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ identificacion }),
@@ -120,7 +120,7 @@ const Registro = () => {
     setError(null);
 
     try {
-      const response = await fetch("http://localhost:3001/api/cerrar-grupo", {
+      const response = await fetch("/api/cerrar-grupo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ grupoId: grupoActivo }),
