@@ -10,8 +10,6 @@ import {
   where, 
   getDocs, 
   addDoc, 
-  doc, 
-  setDoc,
   updateDoc,
   limit,
   orderBy 
