@@ -2,17 +2,20 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import "../PantallasCss/registro.css";
 
-interface RegistroResponse {
-  message: string;
-  grupoId?: number;
-  numeroEnGrupo?: number;
-}
-
-interface VerificarResponse {
-  existe: boolean;
-  grupoId?: number;
-  message?: string;
-}
+// Importaciones de Firebase
+import { db } from "../firebase/firebaseConfig"; // Asegúrate que esta ruta sea correcta
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  addDoc, 
+  doc, 
+  setDoc,
+  updateDoc,
+  limit,
+  orderBy 
+} from "firebase/firestore";
 
 const Registro = () => {
   const [nombre, setNombre] = useState("");
@@ -24,25 +27,32 @@ const Registro = () => {
 
   const navigate = useNavigate();
 
-  // Consulta grupo abierto cada vez que mensaje cambia
+  // --- BUSCAR GRUPO ABIERTO ---
   const fetchGrupoActivo = async () => {
     try {
-      const res = await fetch("/api/grupo-abierto");
-      const data = await res.json();
-      if (data.grupoId) {
-        setGrupoActivo(data.grupoId);
+      const gruposRef = collection(db, "grupos");
+      // Buscamos cualquier grupo que tenga cerrado == false
+      const q = query(gruposRef, where("cerrado", "==", false), limit(1));
+      const snapshot = await getDocs(q);
+
+      if (!snapshot.empty) {
+        const grupoData = snapshot.docs[0].data();
+        setGrupoActivo(grupoData.grupoid);
       } else {
         setGrupoActivo(null);
       }
-    } catch {
+    } catch (err) {
+      console.error("Error buscando grupo activo:", err);
       setGrupoActivo(null);
     }
   };
 
   useEffect(() => {
     fetchGrupoActivo();
-  }, [mensaje]);
+  }, [mensaje]); // Recarga cuando hay un mensaje de éxito (ej. al cerrar grupo)
 
+
+  // --- REGISTRO DE USUARIO ---
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
@@ -50,29 +60,71 @@ const Registro = () => {
     setError(null);
 
     try {
-      const response = await fetch("/api/registro", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nombre, identificacion }),
-      });
+      // 1. Buscar si ya existe un grupo abierto
+      const gruposRef = collection(db, "grupos");
+      const qAbierto = query(gruposRef, where("cerrado", "==", false), limit(1));
+      const abiertoSnap = await getDocs(qAbierto);
 
-      const data: RegistroResponse = await response.json();
+      let elGrupoId = 0;
 
-      if (!response.ok) {
-        throw new Error(data.message || "Error al registrar. Inténtalo de nuevo.");
+      if (abiertoSnap.empty) {
+        // NO hay grupo abierto. Buscar cuál fue el último ID usado para sumar +1.
+        const qUltimo = query(gruposRef, orderBy("grupoid", "desc"), limit(1));
+        const ultimoSnap = await getDocs(qUltimo);
+        
+        if (!ultimoSnap.empty) {
+          elGrupoId = ultimoSnap.docs[0].data().grupoid + 1;
+        } else {
+          elGrupoId = 0; // Es el primer grupo de la historia
+        }
+
+        // Crear el nuevo grupo
+        await addDoc(collection(db, "grupos"), {
+          cerrado: false,
+          grupoid: elGrupoId
+        });
+      } else {
+        // SÍ hay grupo abierto, usamos ese
+        elGrupoId = abiertoSnap.docs[0].data().grupoid;
       }
 
-      setMensaje(data.message);
-      setGrupoActivo(data.grupoId ?? null);
+      // 2. Verificar si la persona ya existe (opcional, por seguridad)
+      const personasRef = collection(db, "personas");
+      const qExiste = query(personasRef, where("identidad", "==", identificacion));
+      const existeSnap = await getDocs(qExiste);
+      
+      if (!existeSnap.empty) {
+        throw new Error("Este ID ya está registrado.");
+      }
+
+      // 3. Calcular ID interno (número en el grupo)
+      const qPersonasGrupo = query(personasRef, where("grupoid", "==", `/coleccion/grupos/id/${elGrupoId}`));
+      const personasSnap = await getDocs(qPersonasGrupo);
+      const numeroEnGrupo = personasSnap.size;
+
+      // 4. Guardar la persona
+      await addDoc(personasRef, {
+        nombre: nombre,
+        identidad: identificacion,
+        grupoid: `/coleccion/grupos/id/${elGrupoId}`,
+        id: numeroEnGrupo
+      });
+
+      setMensaje("Registrado correctamente");
+      setGrupoActivo(elGrupoId);
       setNombre("");
       setIdentificacion("");
+      
     } catch (err: any) {
-      setError(err.message || "Error inesperado");
+      console.error(err);
+      setError(err.message || "Error al registrar. Inténtalo de nuevo.");
     } finally {
       setLoading(false);
     }
   };
 
+
+  // --- INGRESAR (Verificar ID) ---
   const handleIngresar = async () => {
     if (!identificacion || identificacion.length !== 13) {
       setError("Por favor ingresa un ID válido de 13 caracteres.");
@@ -84,33 +136,33 @@ const Registro = () => {
     setError(null);
 
     try {
-      const response = await fetch("/api/verificar-id", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identificacion }),
-      });
+      const personasRef = collection(db, "personas");
+      const q = query(personasRef, where("identidad", "==", identificacion));
+      const snapshot = await getDocs(q);
 
-      const data: VerificarResponse = await response.json();
+      if (!snapshot.empty) {
+        const data = snapshot.docs[0].data();
+        // Extraer el número de grupo del string "/coleccion/grupos/id/X"
+        // Si el string es complejo, usamos split.
+        const partes = (data.grupoid || "").split("/");
+        const grupoIdNum = parseInt(partes[partes.length - 1]) || 0;
 
-      if (!response.ok) {
-        throw new Error(data.message || "Error al verificar ID.");
-      }
-
-      if (data.existe) {
-        // Redirige a adivinanzas
-        navigate("/adivinanzas", { state: { identificacion, grupoId: data.grupoId } });
+        navigate("/adivinanzas", { state: { identificacion, grupoId: grupoIdNum } });
       } else {
         setError("El ID no está registrado. Por favor regístrate primero.");
       }
     } catch (err: any) {
-      setError(err.message || "Error inesperado");
+      console.error(err);
+      setError("Error inesperado al verificar ID.");
     } finally {
       setLoading(false);
     }
   };
 
+
+  // --- CERRAR GRUPO ---
   const handleCerrarGrupo = async () => {
-    if (!grupoActivo) {
+    if (grupoActivo === null) {
       setError("No hay grupo activo para cerrar.");
       return;
     }
@@ -120,33 +172,38 @@ const Registro = () => {
     setError(null);
 
     try {
-      const response = await fetch("/api/cerrar-grupo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ grupoId: grupoActivo }),
-      });
+      // Buscar el documento del grupo activo para obtener su ID de documento (doc.id)
+      const gruposRef = collection(db, "grupos");
+      const q = query(gruposRef, where("grupoid", "==", grupoActivo), limit(1));
+      const snapshot = await getDocs(q);
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Error al cerrar grupo.");
+      if (!snapshot.empty) {
+        const docRef = snapshot.docs[0].ref;
+        // Actualizar estado a cerrado: true
+        await updateDoc(docRef, {
+          cerrado: true
+        });
+        
+        setMensaje(`Grupo #${grupoActivo} cerrado correctamente.`);
+        setGrupoActivo(null); // Ya no hay grupo activo visible hasta que alguien cree el siguiente
+      } else {
+        setError("No se encontró el grupo en la base de datos.");
       }
-
-      setMensaje(data.message);
-      setGrupoActivo(null);
     } catch (err: any) {
-      setError(err.message || "Error inesperado");
+      console.error(err);
+      setError("Error al cerrar el grupo.");
     } finally {
       setLoading(false);
     }
   };
+
 
   return (
     <div className="registro-page">
       <div className="registro-card">
         <h1 className="registro-title">Registro de Personas</h1>
         <p className="registro-subtitle">
-          {grupoActivo
+          {grupoActivo !== null
             ? `Ingresa tu nombre e ID para el grupo actual (#${grupoActivo}).`
             : "Ingresa tu nombre e ID para abrir el siguiente grupo."}
         </p>
@@ -171,7 +228,7 @@ const Registro = () => {
               className="registro-input"
               value={identificacion}
               onChange={e => setIdentificacion(e.target.value)}
-              placeholder="Ej. 123456"
+              placeholder="Ej. 1234567890123"
               required
               disabled={loading}
             />
